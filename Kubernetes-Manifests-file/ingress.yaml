@@ -11,7 +11,7 @@ metadata:
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:844646036290:certificate/25b52da1-4408-4a15-b5db-6b601a2698ce
     alb.ingress.kubernetes.io/ssl-redirect: "443"
 spec:
-  ingressClassName: alb
+  ingressClassName: alb # this is a application load balancer in AWS
   rules:
     - http:
         paths:
