@@ -1,0 +1,131 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk'
+        nodejs 'nodejs'
+    }
+    environment  {
+        SCANNER_HOME=tool 'sonar-scanner'
+        AWS_ACCOUNT_ID = credentials('ID_AWS')
+        AWS_ECR_REPO_NAME = credentials('BACKEND_REPO')
+        AWS_DEFAULT_REGION = 'us-east-2'
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
+    }
+
+    stages {
+        stage('Clean WorkSpace') {
+            steps {
+                cleanWs()
+            }
+        }
+        
+        stage('Checkout Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Universe1609/project-devsecops-three-tier'
+            }
+        }
+        
+        stage('Analisis Sonarqube') {
+            steps {
+                dir('Application-Code/backend') {
+                withSonarQubeEnv('sonar-server') {
+                        sh ''' $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=three-tier-backend \
+                        -Dsonar.projectKey=three-tier-backend '''
+                 }
+              }
+            }
+        }
+        
+        stage('Quality Check') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar' 
+                }
+            }
+        }
+        
+       stage('Escaneo de Dependencias con OWASP') {
+            steps {
+                dir('Application-Code/backend') {
+                    dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                }
+            }
+        }
+        
+        stage('Escaneo de archivos con Trivy') {
+            steps {
+                dir('Application-Code/backend') {
+                    sh 'trivy fs . > ../../trivyfs-backend-job-${BUILD_NUMBER}-${BUILD_ID}.txt'
+                }
+            }
+        }
+        
+         stage("Construccion de Imagen") {
+            steps {
+                script {
+                    dir('Application-Code/backend') {
+                            sh 'docker system prune -f'
+                            sh 'docker container prune -f'
+                            sh 'docker build -t ${AWS_ECR_REPO_NAME} .'
+                    }
+                }
+            }
+        }
+        stage ("Escaneo de imagen con Trivy"){
+            steps {
+                sh 'trivy image ${AWS_ECR_REPO_NAME} > trivyimage-backend-job-${BUILD_NUMBER}-${BUILD_ID}.txt'
+            }
+        }
+        stage("Subiendo a ECR") {
+            steps {
+                script {
+                        sh 'aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${REPOSITORY_URI}'
+                        sh 'docker tag ${AWS_ECR_REPO_NAME} ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
+                        sh 'docker push ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
+                }
+            }
+        }
+
+
+        stage('Actualizando repo') {
+            environment {
+                GIT_REPO_NAME = "project-devsecops-three-tier"
+                GIT_USER_NAME = "Universe1609"
+            }
+            steps {
+                dir('Kubernetes-Manifests-file/Backend') {
+                    withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+                        sh '''
+                        git config user.email "cloudgroupuni@gmail.com"
+                        git config user.name "Universe1609"
+                        BUILD_NUMBER=${BUILD_NUMBER}
+                        echo $BUILD_NUMBER
+                        imageTag=$(grep -oP '(?<=backend:)[^ ]+' deployment.yaml)
+                        echo $imageTag
+                        sed -i "s/${AWS_ECR_REPO_NAME}:${imageTag}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}/" deployment.yaml
+                        git add deployment.yaml
+                        git commit -m "Update deployment Image to version \${BUILD_NUMBER}"
+                        git push "https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}" HEAD:main
+                    '''
+                    }
+                }
+            }
+        }
+    }
+    post {
+    always {
+        script {
+            emailext attachLog: true,
+                subject: "'${currentBuild.result}'",
+                body: "Project: ${env.JOB_NAME} " +
+                    "Build Number: ${env.BUILD_NUMBER} " +
+                    "URL: ${env.BUILD_URL} ",
+                to: 'cloudgroupuni@gmail.com',  
+                attachmentsPattern: 'trivyfs-backend-job-*.txt , trivyimage-backend-job-*.txt'
+            }
+        }
+    }
+
+}
