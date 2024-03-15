@@ -9,7 +9,7 @@ metadata:
     #alb.ingress.kubernetes.io/backend-protocol: http
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:844646036290:certificate/25b52da1-4408-4a15-b5db-6b601a2698ce
-    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
 spec:
   ingressClassName: alb
   rules:
@@ -20,13 +20,12 @@ spec:
           #  backend:
           #    service:
           #      name: api
-          #      port:   
+          #      port:
           #        number: 3500
           - path: /
             pathType: Prefix
             backend:
               service:
                 name: frontend
-                port: 
+                port:
                   number: 3000
-      

@@ -8,3 +8,4 @@ argo-pass.txt
 token-github.txt
 EKS-Scripts
 nginx
+.gitignore
